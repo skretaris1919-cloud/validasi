@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <title>Validasi Jam Kerja</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background-color: #f0f4f8;
+      margin: 0;
+      padding: 0;
+    }
+    .form-box {
+      background-color: #ffffff;
+      padding: 16px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      max-width: 480px;
+      margin: 24px auto;
+      box-sizing: border-box;
+    }
+    input {
+      width: 100%;
+      padding: 14px;
+      font-size: 18px;
+      margin-bottom: 16px;
+      border-radius: 8px;
+      border: 1px solid #0077b6;
+      background-color: #d0ecff;
+      color: #0077b6;
+      font-weight: bold;
+      box-sizing: border-box;
+    }
+    button {
+      width: 100%;
+      padding: 14px;
+      font-size: 18px;
+      margin-top: 16px;
+      border-radius: 8px;
+      border: none;
+      background-color: #a8f0c6;
+      color: #006644;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    @media (max-width: 480px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .label {
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+    .value {
+      font-size: 16px;
+      font-weight: bold;
+      background-color: #eef6fb;
+      padding: 8px;
+      border-radius: 6px;
+      color: #0077b6;
+    }
+    #lokasi-status, #debug-info {
+      font-weight: bold;
+      text-align: center;
+      margin-top: 16px;
+      color: #0077b6;
+    }
+  </style>
+</head>
+<body>
+
+<div class="form-box" id="form-box">
+  <h2 style="text-align:center; color:#0077b6;">✅ Validasi Jam Kerja</h2>
+
+  <input type="text" id="nama" placeholder="Nama Santri" readonly />
+  <input type="text" id="wa" placeholder="Nomor WA" readonly />
+
+  <div class="grid">
+    <div><div class="label">Kegiatan</div><div class="value" id="kegiatan">—</div></div>
+    <div><div class="label">Hari</div><div class="value" id="hari">—</div></div>
+    <div><div class="label">Instansi</div><div class="value" id="instansi">—</div></div>
+    <div><div class="label">Jabatan</div><div class="value" id="jabatan">—</div></div>
+    <div><div class="label">Mulai</div><div class="value" id="mulai">—</div></div>
+    <div><div class="label">Selesai</div><div class="value" id="selesai">—</div></div>
+    <div><div class="label">Durasi</div><div class="value" id="durasi">—</div></div>
+    <div><div class="label">Status</div><div class="value" id="status">—</div></div>
+    <div><div class="label">Durasi Status</div><div class="value" id="drs-status">—</div></div>
+  </div>
+
+  <button id="btn-lokasi">🔐 Validasi Lokasi & Absen</button>
+  <div id="lokasi-status">—</div>
+  <div id="debug-info">—</div>
+</div>
+
+<script type="module">
+  import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
+
+  const supabase = createClient(
+    'https://brnqpdvtninzyqqwhmfj.supabase.co',
+    'SUPABASE_ANON_KEY'
+  );
+
+  const $ = id => document.getElementById(id);
+  const pesantrenLat = -7.036533;
+  const pesantrenLng = 112.743574;
+  const radiusAman = 500;
+  let dataSantri = null;
+
+  function hitungJarak(lat1, lng1, lat2, lng2) {
+    const R = 6371e3;
+    const toRad = deg => deg * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+              Math.sin(dLng/2) * Math.sin(dLng/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  }
+
+  function formatDurasi(ms) {
+    const totalSec = Math.abs(Math.floor(ms / 1000));
+    const jam = Math.floor(totalSec / 3600);
+    const menit = Math.floor((totalSec % 3600) / 60);
+    const detik = totalSec % 60;
+    return `${jam.toString().padStart(2,'0')} Jam ${menit.toString().padStart(2,'0')} Menit ${detik.toString().padStart(2,'0')} Detik`;
+  }
+
+  async function ambilDataSantri(wa) {
+    const hariMap = { "MINGGU": "AHAD", "JUMAT": "JUM'AT" };
+    const hariSekarang = new Intl.DateTimeFormat("id-ID", { weekday: "long" }).format(new Date()).toUpperCase();
+    const hariValid = (hariMap[hariSekarang] || hariSekarang).toUpperCase();
+
+    const { data, error } = await supabase
+      .from("tb_jamker")
+      .select("*")
+      .ilike("wa", wa)
+      .ilike("hari", hariValid)
+      .limit(1)
+      .single();
+
+    if (error || !data) return null;
+
+    const sekarang = new Date();
+    const mulai = new Date(`${sekarang.toDateString()} ${data.mulai}`);
+    const selisihMs = mulai - sekarang;
+
+    let status = "—";
+    if (Math.abs(selisihMs) <= 5 * 60 * 1000) {
+      status = "Pas";
+    } else if (selisihMs < 0) {
+      status = "Telat";
+    } else {
+      status = "Maju";
+    }
+
+    const drsStatus = formatDurasi(selisihMs);
+
+    return { ...data, status, drsStatus };
+  }
+
+  window.addEventListener("DOMContentLoaded", async () => {
+    document.getElementById("form-box").scrollIntoView({ behavior: "smooth" });
+
+    let wa = new URLSearchParams(window.location.search).get("wa") || "";
+    wa = wa.replace(/^\+62/, "628").replace(/[^0-9]/g, "");
+    $("wa").value = wa;
+
+    dataSantri = await ambilDataSantri(wa);
+
+    if (!dataSantri) {
+      $("nama").value = "❌ Tidak ditemukan atau waktu tidak valid";
+      return;
+    }
+
+    $("nama").value = dataSantri.nama || "—";
+    $("kegiatan").textContent = dataSantri.kegiatan || "—";
+    $("hari").textContent = dataSantri.hari || "—";
+    $("instansi").textContent = dataSantri.instansi || "—";
+    $("jabatan").textContent = dataSantri.jabatan || "—";
+    $("mulai").textContent = dataSantri.mulai || "—";
+    $("selesai").textContent = dataSantri.selesai || "—";
+    $("durasi").textContent = dataSantri.durasi || "—";
+    $("status").textContent = dataSantri.status || "—";
+    $("drs-status").textContent = dataSantri.drsStatus || "—";
+  });
+
+  $("btn-lokasi").addEventListener("click", async () => {
+    if (!navigator.geolocation) {
+      $("lokasi-status").textContent = "❌ Browser tidak mendukung pelacakan lokasi.";
+      return;
+    }
+
+   $("lokasi-status").textContent = "⏳ Mengambil lokasi...";
+
+navigator.geolocation.getCurrentPosition(async pos => {
+  const userLat = pos.coords.latitude;
+  const userLng = pos.coords.longitude;
+  const akurasi = pos.coords.accuracy;
+  const jarak = hitungJarak(userLat, userLng, pesantrenLat, pesantrenLng);
+
+  $("debug-info").innerHTML = `
+    📍 Lokasi GPS: ${userLat}, ${userLng}<br>
+    📏 Jarak ke titik: ${jarak.toFixed(2)} meter<br>
+    📍 Akurasi GPS: ${akurasi.toFixed(2)} meter
+  `;
+
+  if (jarak > radiusAman || akurasi > 1000) {
+    $("lokasi-status").textContent = "❌ Anda sedang di luar titik koordinat Pesantren Al Falah Kepang.";
+    return;
+  }
+
+  const tanggal = new Date().toISOString().slice(0, 10);
+  const jam = new Date().toTimeString().slice(0, 8);
+
+  const { data: cek, error: errCek } = await supabase
+    .from("tb_absen")
+    .select("id")
+    .ilike("no_id", dataSantri.no_id)
+    .ilike("tanggal", tanggal)
+    .ilike("kegiatan", dataSantri.kegiatan)
+    .limit(1)
+    .single();
+
+  if (cek) {
+    $("lokasi-status").textContent = `⚠️ Anda sudah absen untuk kegiatan ${dataSantri.kegiatan}`;
+    return;
+  }
+
+  const { error: errSimpan } = await supabase
+    .from("tb_absen")
+    .insert([{
+      no_id: dataSantri.no_id,
+      nama: dataSantri.nama,
+      instansi: dataSantri.instansi,
+      jabatan: dataSantri.jabatan,
+      kegiatan: dataSantri.kegiatan,
+      hari: dataSantri.hari,
+      mulai: dataSantri.mulai,
+      selesai: dataSantri.selesai,
+      drs_kegiatan: dataSantri.durasi,
+      status: dataSantri.status,
+      drs_status: dataSantri.drsStatus,
+      tanggal: tanggal,
+      jam_absen: jam
+    }]);
+
+  if (errSimpan) {
+    $("lokasi-status").textContent = "❌ Gagal menyimpan absen.";
+  } else {
+    $("lokasi-status").textContent = `✅ Absen berhasil untuk kegiatan ${dataSantri.kegiatan}`;
+  }
+
+}, err => {
+  $("lokasi-status").textContent = "❌ Gagal mengambil lokasi: " + err.message;
+});
